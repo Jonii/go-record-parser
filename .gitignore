@@ -1,0 +1,8 @@
+data
+scraped
+__pycache__
+resources
+.ipynb_checkpoints
+.vscode
+gor.db
+test_scripts
