@@ -38,7 +38,9 @@ def expected_result_expression(beta_column: str|pl.Expr = "beta",
                                opponent_beta_column: str|pl.Expr = "beta_opponent",
                                output_column: str = "expected_result") -> pl.Expr:
     """
-    Returns a Polars expression to calculate the expected result.
+    Returns a Polars expression to calculate the expected result, based on betas.
+
+    The expected result is the probability of the first player winning the game(1.0 = 100% chance of winning, 0.0 = 0% chance of winning)
     """
     beta_column = column_name_to_expr(beta_column)
     opponent_beta_column = column_name_to_expr(opponent_beta_column)
@@ -50,7 +52,11 @@ def expected_result_expression(beta_column: str|pl.Expr = "beta",
 def rating_volatility_expression(gor_column: str|pl.Expr = "igor",
                                  output_column: str = "rating_volatility") -> pl.Expr:
     """
-    Returns a Polars expression to compute rating volatilities based on GOR.
+    Returns a Polars expression to compute rating volatility based on gor.
+
+    Rating volatility acts as a multiplier for Gor change, lower rated players experience swifter rating changes.
+    The rationale there is roughly, lower rated players can change in their rank more quickly, so
+    the rating system needs to be able to keep up with that.
     """
     gor_column = column_name_to_expr(gor_column)
     rating_volatility = (np.power(((3300 - gor_column) / 200), 1.6)).alias(output_column) # type: ignore
@@ -62,6 +68,10 @@ def bonus_expression(gor_column: str|pl.Expr = "igor",
                      output_column: str = "bonus") -> pl.Expr:
     """
     Returns a Polars expression to calculate bonuses based on GOR.
+
+    Bonuses are essentially "How much player probably improved from playing a game",
+    which is then added to the Gor change. Lower rated players are expected to learn more,
+    so their bonus is higher.
     """
     gor_column = column_name_to_expr(gor_column)
     bonus = (np.log(1 + np.exp((2300 - gor_column) / 80)) / 5).alias(output_column)
@@ -75,7 +85,7 @@ def gor_change_expression(rating_volatility_column: str|pl.Expr = "rating_volati
                            gor_weight_column: str|pl.Expr = "gor_weight",
                            output_column: str = "gor_change") -> pl.Expr:
     """
-    Returns Polars expressions to compute raw and final GOR changes.
+    Returns Polars expression to calculate Gor change based on rating volatility, win, expected result, bonus, and Gor weight.
     """
     rating_volatility_column = column_name_to_expr(rating_volatility_column)
     win_column = column_name_to_expr(win_column)
