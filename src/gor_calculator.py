@@ -31,9 +31,6 @@ def beta_expression(adjusted_gor_column: str|pl.Expr, output_column: str) -> pl.
     adjusted_gor_column = column_name_to_expr(adjusted_gor_column)
     return (np.log(3300 - adjusted_gor_column) * -7).alias(output_column)
 
-    #return (np.log(3300 - pl.col(adjusted_gor_column)) * -7).alias(output_column)
-    #
-
 def expected_result_expression(beta_column: str|pl.Expr = "beta",
                                opponent_beta_column: str|pl.Expr = "beta_opponent",
                                output_column: str = "expected_result") -> pl.Expr:
@@ -45,7 +42,6 @@ def expected_result_expression(beta_column: str|pl.Expr = "beta",
     beta_column = column_name_to_expr(beta_column)
     opponent_beta_column = column_name_to_expr(opponent_beta_column)
     expected_result = (1 / (1 + np.exp(opponent_beta_column - beta_column))).alias(output_column)
-    #expected_result = (1 / (1 + np.exp(pl.col(opponent_beta_column) - pl.col(beta_column)))).alias(output_column)
     return expected_result
 
 
@@ -60,7 +56,6 @@ def rating_volatility_expression(gor_column: str|pl.Expr = "igor",
     """
     gor_column = column_name_to_expr(gor_column)
     rating_volatility = (np.power(((3300 - gor_column) / 200), 1.6)).alias(output_column) # type: ignore
-    #rating_volatility = (np.power(((3300 - pl.col(gor_column)) / 200), 1.6)).alias(output_column)  # type: ignore
     return rating_volatility
 
 
@@ -98,12 +93,6 @@ def gor_change_expression(rating_volatility_column: str|pl.Expr = "rating_volati
     ).alias("Raw_GoR_Change")
     
     gor_change = (gor_change_raw * gor_weight_column).alias(output_column)
-
-    #gor_change_raw = (
-    #    pl.col(rating_volatility_column) * (pl.when(pl.col(win_column) == "+").then(1).otherwise(0) - pl.col(expected_result_column)) + pl.col(bonus_column)
-    #).alias(output_column_raw)
-    
-    #gor_change = (pl.col(output_column_raw) * pl.col(gor_weight_column)).alias(output_column)
     
     return gor_change
 
