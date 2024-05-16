@@ -1,28 +1,5 @@
-import math
 import numpy as np
 import polars as pl
-
-def beta(rating: float) -> float:
-    return -7 * math.log(3300 - rating)
-
-def expected_result(rating1: float, rating2: float) -> float:
-    return 1 / (1 + math.exp(beta(rating2) - beta(rating1)))
-
-# Known as "con" in the formula
-def rating_volatility(rating: float) -> float:
-    return math.pow(((3300 - rating) / 200), 1.6)
-
-# Bonus based on bonus = ln(1 + exp((2300 - rating) / 80)) / 5
-def bonus(rating: float) -> float:
-    return math.log(1 + math.exp((2300 - rating) / 80)) / 5
-
-# Ratings are updated by: r' = r + con * (Sa - Se) + bonus
-def gor_change(rating: float, result: float, expected_result: float) -> float:
-    return rating + rating_volatility(rating) * (result - expected_result) + bonus(rating)
-
-def gor_change_for_game(rating: float, result: float, opponent_rating: float) -> float:
-    return gor_change(rating, result, expected_result(rating, opponent_rating))
-
 
 def column_name_to_expr(column_name: str|pl.Expr) -> pl.Expr:
     return pl.col(column_name) if isinstance(column_name, str) else column_name
@@ -33,10 +10,9 @@ def swap_color_expression(color_column: str = "color") -> pl.Expr:
     """
     return pl.when(pl.col(color_column) == "w").then(pl.lit("b")).when(pl.col(color_column) == "b").then(pl.lit("w")).otherwise(pl.lit(None))
 
-def adjusted_gor_expression(gor_column: str|pl.Expr, output_column: str, handicap_column: str|pl.Expr, color_column: str|pl.Expr = "color",) -> pl.Expr:
+def adjusted_gor_expression(gor_column: str|pl.Expr, handicap_column: str|pl.Expr, color_column: str|pl.Expr = "color", output_column: str = "adjusted_gor",) -> pl.Expr:
     """
     Returns a Polars expression to calculate adjusted GOR based on color and handicap.
-    For use with both players and opponents by specifying gor_column and output_column.
     """
     color_column = column_name_to_expr(color_column)
     handicap_column = column_name_to_expr(handicap_column)
@@ -51,7 +27,6 @@ def adjusted_gor_expression(gor_column: str|pl.Expr, output_column: str, handica
 def beta_expression(adjusted_gor_column: str|pl.Expr, output_column: str) -> pl.Expr:
     """
     Returns a Polars expression to calculate beta values from adjusted GORs.
-    Adjusted GOR column name and output column name are parameterized.
     """
     adjusted_gor_column = column_name_to_expr(adjusted_gor_column)
     return (np.log(3300 - adjusted_gor_column) * -7).alias(output_column)
