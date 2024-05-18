@@ -32,8 +32,33 @@ def test_tournament_info():
     assert info_df["HA"][0] == "h9"
     assert info_df["KM"][0] == "6.5"
     assert info_df["TM"][0] == "90"
-    assert info_df["CM"][0].strip() == "Test comment"
+    assert info_df["CM"][0] == " Test comment "
     assert info_df["tournament"][0] == t_id
+
+def test_games_columns():
+    t_id = "T000101F"
+    info_df, games_df = parsing.tournament_as_df(test_gotha, t_id)
+    assert games_df.columns == [
+        "tournament",
+        "position",
+        "pin", 
+        "surname", 
+        "first_name", 
+        "rank", 
+        "rank_comparison_number",
+        "opponent_position", 
+        "opponent_pin",
+        "opponent_surname",
+        "opponent_first_name",
+        "opponent_rank",
+        "opponent_rank_comparison_number",
+        "round_number",
+        "result",
+        "color",
+        "explicit_handicap",
+        "handicap",
+        "gor_weight",
+    ]
 
 def test_parsing_player_info():
     t_id = "T000101F"
@@ -55,3 +80,40 @@ def test_parsing_games():
     assert first_player_df["result"].to_list() == ["+", "-", "+", "+", "+", "+"]
     assert first_player_df["color"].to_list() == ["b", "w", "b", "w", "b", "b"]
     assert first_player_df["opponent_position"].to_list() == [5, 4, 3, 2, 5, 4]
+
+test_gotha2 = """
+; CL[B]
+; EV[GPE]
+; PC[DE, Hamburg]
+; KM[5.5]
+; TM[0]
+; HA[h3]
+;                     Tourney title, Hamburg 1996
+;                             May 25 - 27, 1996
+;
+;Pl     Name              Rank  Club   MM S SOS SSOS  1.   2.   3.   4.   5.   6.  
+  1 Playah One                3d NL Hilv 29 6 159 952  12+   3+   7+   2+   6+   8+  |11111111
+  2 Gamer Two                5d DE Sie  28 5 160 940  10+  16+   5+   1-   4+  3+   |22222222
+  3 Fella The_Third_Really_Super_Cool_Dude 1d DE HH 27 4 158 947   4+   1-  16+  11+   12-   2-     |33333333
+  4 Woah Dude                4d DE HH 27 4 157 946   3-  11+  10+   6+   2-   5-   |44444444
+"""
+
+def test_long_name_parsing():
+    t_id = "T000102F"
+    info_df, games_df = parsing.tournament_as_df(test_gotha2, t_id)
+    player_dfs = games_df.partition_by(["pin"], as_dict=True)
+    long_player_df = player_dfs[(33333333,)].sort("round_number")
+    assert long_player_df["surname"].to_list() == ["Fella"] * 6
+    assert long_player_df["first_name"].to_list() == ["The_Third_Really_Super_Cool_Dude"] * 6
+    assert long_player_df["rank"].to_list() == ["1d"] * 6
+
+def test_plain_game_result_parsing():
+    t_id = "T000102F"
+    info_df, games_df = parsing.tournament_as_df(test_gotha2, t_id)
+    player_dfs = games_df.partition_by(["pin"], as_dict=True)
+    long_player_df = player_dfs[(33333333,)].sort("round_number")
+    assert long_player_df["result"].to_list() == ["+", "-", "+", "+", "-", "-"]
+    assert long_player_df["color"].to_list() == [None] * 6
+    assert long_player_df["opponent_position"].to_list() == [4, 1, 16, 11, 12, 2]
+    assert long_player_df["explicit_handicap"].to_list() == [None] * 6
+    assert long_player_df["handicap"].to_list() == [0, 0, None, None, None, 1]
