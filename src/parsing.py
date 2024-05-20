@@ -4,7 +4,7 @@ import re
 import numpy as np
 
 # Matches a string like "35+/b0" and extracts 35 as position, + as result, b as color and 0 as handicap
-game_result_pattern_string = r"^0?\?$|^0=0$|^(?P<opponent_position>\d+)?(?P<result>[+\-=])([\/!]?(?P<color>[bwBW])?H?(?P<explicit_handicap>[0-9O]+)?)?$"
+game_result_pattern_string = r"^0?\?$|^0=0$|^(?P<opponent_position>\d+)?(?P<result>[+\-=])([\/!]?(?P<color>[bwBW])?H?(?P<explicit_handicap>[0-9O]+)?)?.?$"
 
 # Matches a string like "something |123" and extracts the number 123
 pin_pattern = r"\|(?P<pin>\d+)\D*$"
@@ -54,35 +54,28 @@ def parse_gotha_games(gotha_string: str, tournament_id: str|None = None) -> pl.D
         pl.col(raw_df.columns[3]).alias("rank"),
     ])
 
-    # Adds rank comparison number column, an arbitrary number to 
-    # make it easy to calculate handicap. Zero is at 1k, higher numbers are stronger.
-    rank_extractor_pattern = r"(?P<rank_number>\d+)(?P<dankyu>[pPdDkK])?"
+    # Rank column with just number is taken to be kyu rank. Convert rank column to reflect that.
     df = df.with_columns(
-        pl.col("rank").str.extract_groups(rank_extractor_pattern).alias("rank_struct"),
-    ).unnest("rank_struct").with_columns(
-        pl.col("rank_number").cast(pl.Int8),
-        pl.col("dankyu").str.to_lowercase()
-    ).with_columns(
-        pl.when(pl.col("dankyu") == "p").then(pl.lit(10))
-        .when(pl.col("dankyu") == "d").then(pl.col("rank_number"))
-        .when(pl.col("dankyu") == "k").then(1 + pl.col("rank_number") * -1).alias("rank_comparison_number")
+        pl.when(pl.col("rank").str.contains(r"^\d+$"))
+            .then(pl.concat_str([pl.col("rank"), pl.lit("k")]))
+          .otherwise(pl.col("rank")).alias("rank")
     )
+    df = calculate_rank_comparison_number(df, rank_column="rank")
 
     # Melt the dataframe so each game is on its own row, with result at column "raw_result"
     games_df = raw_df.select([column.name for column in
-        raw_df.select(pl.all(
-            ).exclude("pin", *raw_df.columns[0:3]
-            ).str.extract_groups(game_result_pattern_string
-            )
-        ).select(
-            pl.all().struct.field("result").is_not_null().all().name.keep()
+        raw_df.select(
+                pl.all().exclude("pin", *raw_df.columns[0:3]).str.contains(game_result_pattern_string)
+            ).select(
+                pl.all().all().name.keep()
         )
         if column.item() == True]
     )
-    games_df = games_df.rename({old_name: f"{i}" for i, old_name in enumerate(games_df.columns, start=1)})
+    
+    games_df = games_df.rename({old_name: f"round_{i}" for i, old_name in enumerate(games_df.columns, start=1)})
     games_df = pl.concat([df, games_df], how="horizontal"
         ).melt(id_vars=df.columns, value_vars=cs.matches("round_.*"), variable_name="round_number", value_name="raw_result"
-        ).with_columns(pl.col("round_number").cast(pl.Int8)
+        ).with_columns(pl.col("round_number").str.extract(r"round_(\d+)").cast(pl.Int8)
     )
 
 
@@ -101,14 +94,14 @@ def parse_gotha_games(gotha_string: str, tournament_id: str|None = None) -> pl.D
         pl.col("opponent_position").cast(pl.Int32),
         pl.col("color").str.to_lowercase(),
         pl.col("explicit_handicap").str.replace("O$", "0").cast(pl.Int32)
-    # Add info about opponent to the dataframe, with prefix "opponent_". Polars doesn't have "prefix", hence "rename" call.
+    # Add info about opponent to the dataframe, with prefix "opponent_". Polars join doesn't have "prefix", hence "rename" call.
     ).join(
         df, 
         left_on="opponent_position", 
         right_on="position", 
         how="left", 
         suffix="_opponent"
-    ).rename(lambda x: "opponent_" + x.replace("_opponent", "") if x.endswith("_opponent") else x
+    ).rename(lambda x: "opponent_" + x[:-9] if x.endswith("_opponent") else x
     ).select([
         "tournament",
         "position",
@@ -129,6 +122,28 @@ def parse_gotha_games(gotha_string: str, tournament_id: str|None = None) -> pl.D
         "explicit_handicap",
     ])
     return games_df
+
+def calculate_rank_comparison_number(
+        df: pl.DataFrame,
+        rank_column: str = "rank",
+    ):
+    """
+    Adds rank comparison number column, an arbitrary number to 
+    make it easy to calculate handicap. Zero is at 1k, higher numbers are stronger."""
+    rank_extractor_pattern = r"(?P<rank_number>\d+)(?P<dankyu>[pPdDkK])?"
+    df = df.with_columns(
+        pl.col(rank_column).str.extract_groups(rank_extractor_pattern).alias("rank_struct"),
+    ).unnest("rank_struct").with_columns(
+        pl.col("rank_number").cast(pl.Int8),
+        (pl.when(pl.col("dankyu").is_not_null()).then(pl.col("dankyu").str.to_lowercase())
+            .otherwise(pl.lit("k"))).alias("dankyu")
+    ).with_columns(
+        pl.when(pl.col("dankyu") == "p").then(pl.lit(10))
+        .when(pl.col("dankyu") == "d").then(pl.col("rank_number"))
+        .when(pl.col("dankyu") == "k").then(1 + pl.col("rank_number") * -1).alias("rank_comparison_number"),
+    )
+    
+    return df
 
 def tournament_as_df(gotha_string: str, tournament_id: str|None) -> tuple[pl.DataFrame, pl.DataFrame]:
     '''
@@ -185,8 +200,26 @@ def tournament_as_df(gotha_string: str, tournament_id: str|None) -> tuple[pl.Dat
     info_df = tournament_info(gotha_string).with_columns(
         pl.lit(tournament_id, dtype=pl.String).alias("tournament")
     )
-    if "HA" in info_df.columns:
-        handicap_reduction = info_df["HA"].str.extract(r"(\d+)").cast(pl.Int32).alias("handicap_reduction")
+
+    # If handicap is set explicitly even for some games, assume no explicit handicap = 0 handicap.
+    handicap_policy = info_df["HA"].item()
+    games = calculate_handicap(games, handicap_policy)
+    games = games.with_columns(
+        pl.lit(tournament_id, dtype=pl.String).alias("tournament"),
+        info_df["gor_weight"].cast(pl.Float64).alias("gor_weight"),
+    )
+    return info_df, games
+
+def calculate_handicap(games, handicap_policy: str|None = None):
+    if len(games.filter(pl.col("explicit_handicap").is_not_null())) > 0:
+        games = games.with_columns(
+            pl.when(pl.col("explicit_handicap").is_null()).then(pl.lit(0)).otherwise(pl.col("explicit_handicap")).alias("handicap"),
+        )
+
+    elif handicap_policy is not None:
+        handicap_reduction = (
+            pl.lit(int(handicap_policy[1]) if handicap_policy[0] == "h" or handicap_policy[0] == "m" else int(handicap_policy))
+        )
         games = games.with_columns(
             pl.when((pl.col("explicit_handicap").is_null()) & (pl.col("opponent_rank_comparison_number").is_not_null()))
               .then(pl.max_horizontal(
@@ -197,11 +230,8 @@ def tournament_as_df(gotha_string: str, tournament_id: str|None) -> tuple[pl.Dat
         games = games.with_columns(
             pl.col("explicit_handicap").alias("handicap")
         )
-    games = games.with_columns(
-        pl.lit(tournament_id, dtype=pl.String).alias("tournament"),
-        info_df["gor_weight"].cast(pl.Float64).alias("gor_weight"),
-    )
-    return info_df, games
+        
+    return games
 
 # Metadata in patterns of "<something>XY[Z]", where X and Y are characters(two characters in total) and Z is a value(arbitrary length)
 # Example "; CL[A]", "; KM[6.5]", "; HA[h9]"
