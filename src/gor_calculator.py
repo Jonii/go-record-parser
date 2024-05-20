@@ -89,7 +89,11 @@ def gor_change_expression(rating_volatility_column: str|pl.Expr = "rating_volati
     gor_weight_column = column_name_to_expr(gor_weight_column)
 
     gor_change_raw = (
-        rating_volatility_column * (pl.when(win_column == "+").then(1).when(win_column == "-").then(0).otherwise(pl.lit(None)) - expected_result_column) + bonus_column
+        rating_volatility_column * (
+            pl.when(win_column == "+").then(1)
+               .when(win_column == "-").then(0)
+               .when(win_column == "=").then(0.5)
+               .otherwise(pl.lit(None)) - expected_result_column) + bonus_column
     ).alias("Raw_GoR_Change")
     
     gor_change = (gor_change_raw * gor_weight_column).alias(output_column)
