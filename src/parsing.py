@@ -2,6 +2,7 @@ import polars as pl
 import polars.selectors as cs
 import re
 import numpy as np
+import src.utils as utils
 
 # Matches a string like "35+/b0" and extracts 35 as position, + as result, b as color and 0 as handicap
 game_result_pattern_string = r"^0?\?$|^0=0$|^(?P<opponent_position>\d+)?(?P<result>[+\-=])([\/!]?(?P<color>[bwBW])?H?(?P<explicit_handicap>[0-9O]+)?)?.?$"
@@ -15,14 +16,6 @@ def parse_pin(s: str):
     if match:
         return int(match.group("pin"))
     return None
-
-def check_all(df, column_num, pattern):
-    result = df.select(
-        pl.col(df.columns[column_num]).str.contains(pattern).alias("valid")
-    ).select(
-        pl.col("valid").all()
-    )
-    return result["valid"][0]
 
 
 def parse_gotha_games(gotha_string: str, tournament_id: str|None = None) -> pl.DataFrame:
@@ -142,7 +135,7 @@ def calculate_rank_comparison_number(
         .when(pl.col("dankyu") == "d").then(pl.col("rank_number"))
         .when(pl.col("dankyu") == "k").then(1 + pl.col("rank_number") * -1).alias("rank_comparison_number"),
     )
-    
+
     return df
 
 def tournament_as_df(gotha_string: str, tournament_id: str|None) -> tuple[pl.DataFrame, pl.DataFrame]:
@@ -194,8 +187,6 @@ def tournament_as_df(gotha_string: str, tournament_id: str|None) -> tuple[pl.Dat
     with implicit handicaps would likely result in wrong handicaps. This doesn't seem to be solvable from the available data.
     '''
 
-    if not gotha_string:
-        return pl.DataFrame(), pl.DataFrame()
     games = parse_gotha_games(gotha_string)
     info_df = tournament_info(gotha_string).with_columns(
         pl.lit(tournament_id, dtype=pl.String).alias("tournament")
