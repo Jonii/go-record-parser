@@ -56,13 +56,11 @@ def test_games_columns():
         "surname", 
         "first_name", 
         "rank", 
-        "rank_comparison_number",
         "opponent_position", 
         "opponent_pin",
         "opponent_surname",
         "opponent_first_name",
         "opponent_rank",
-        "opponent_rank_comparison_number",
         "round_number",
         "result",
         "color",
@@ -81,7 +79,6 @@ def test_parsing_player_info():
         assert rounds_dfs["surname"].to_list() == ["Voittaja", "Jaba", "Tyyppi", "Peluri", "Pelaaja"]
         assert rounds_dfs["first_name"].to_list() == ["Ykkonen", "Kakkonen", "Kolmonen", "Nelja", "Viisi"]
         assert rounds_dfs["rank"].to_list() == ["4d", "3d", "4d", "3k", "5k"]
-        assert rounds_dfs["rank_comparison_number"].to_list() == [4, 3, 4, -2, -4]
         assert rounds_dfs["pin"].to_list() == [14011111, 10222222, 10333333, 15444444, 14555555]
 
 def test_parsing_games():
@@ -129,6 +126,10 @@ def test_plain_game_result_parsing():
     assert long_player_df["color"].to_list() == [None] * 6
     assert long_player_df["opponent_position"].to_list() == [4, 1, 16, 11, 12, 2]
     assert long_player_df["explicit_handicap"].to_list() == [None] * 6
+    # Handicap reduction is set to 3 based on HA[h3] in the gotha string.
+    # Some games are against players missing from the data, this should be reflected
+    # as None in the handicap column, as there is no explicit handicap and we can't
+    # calculate it based on rank difference.
     assert long_player_df["handicap"].to_list() == [0, 0, None, None, None, 1]
 
 test_gotha_only_nonzero_handicap_marked = """

@@ -53,7 +53,6 @@ def parse_gotha_games(gotha_string: str, tournament_id: str|None = None) -> pl.D
             .then(pl.concat_str([pl.col("rank"), pl.lit("k")]))
           .otherwise(pl.col("rank")).alias("rank")
     )
-    df = calculate_rank_comparison_number(df, rank_column="rank")
 
     # Melt the dataframe so each game is on its own row, with result at column "raw_result"
     games_df = raw_df.select([column.name for column in
@@ -101,42 +100,18 @@ def parse_gotha_games(gotha_string: str, tournament_id: str|None = None) -> pl.D
         "pin", 
         "surname", 
         "first_name", 
-        "rank", 
-        "rank_comparison_number",
+        "rank",
         "opponent_position", 
         "opponent_pin",
         "opponent_surname",
         "opponent_first_name",
         "opponent_rank",
-        "opponent_rank_comparison_number",
         "round_number",
         "result",
         "color",
         "explicit_handicap",
     ])
     return games_df
-
-def calculate_rank_comparison_number(
-        df: pl.DataFrame,
-        rank_column: str = "rank",
-    ):
-    """
-    Adds rank comparison number column, an arbitrary number to 
-    make it easy to calculate handicap. Zero is at 1k, higher numbers are stronger."""
-    rank_extractor_pattern = r"(?P<rank_number>\d+)(?P<dankyu>[pPdDkK])?"
-    df = df.with_columns(
-        pl.col(rank_column).str.extract_groups(rank_extractor_pattern).alias("rank_struct"),
-    ).unnest("rank_struct").with_columns(
-        pl.col("rank_number").cast(pl.Int8),
-        (pl.when(pl.col("dankyu").is_not_null()).then(pl.col("dankyu").str.to_lowercase())
-            .otherwise(pl.lit("k"))).alias("dankyu")
-    ).with_columns(
-        pl.when(pl.col("dankyu") == "p").then(pl.lit(10))
-        .when(pl.col("dankyu") == "d").then(pl.col("rank_number"))
-        .when(pl.col("dankyu") == "k").then(1 + pl.col("rank_number") * -1).alias("rank_comparison_number"),
-    )
-
-    return df
 
 def tournament_as_df(gotha_string: str, tournament_id: str|None) -> tuple[pl.DataFrame, pl.DataFrame]:
     '''
@@ -157,13 +132,11 @@ def tournament_as_df(gotha_string: str, tournament_id: str|None) -> tuple[pl.Dat
     - surname: str
     - first_name: str
     - rank: str
-    - rank_comparison_number: int
     - opponent_position: int
     - opponent_pin: int
     - opponent_surname: str
     - opponent_first_name: str
     - opponent_rank: str
-    - opponent_rank_comparison_number: int
     - result: str
     - color: str
     - round_number: int
@@ -192,37 +165,19 @@ def tournament_as_df(gotha_string: str, tournament_id: str|None) -> tuple[pl.Dat
         pl.lit(tournament_id, dtype=pl.String).alias("tournament")
     )
 
-    # If handicap is set explicitly even for some games, assume no explicit handicap = 0 handicap.
-    handicap_policy = info_df["HA"].item()
-    games = calculate_handicap(games, handicap_policy)
+    handicap_reduction = info_df["HA"].str.extract(r"[mh]?(\d+)").cast(pl.Int8).item()
+    games = utils.calculate_nominal_handicap(games, "rank", "opponent_rank")
+    games = games.with_columns(
+        pl.when(pl.col("explicit_handicap").is_not_null()).then(pl.col("explicit_handicap"))
+            .when(pl.col("color").is_not_null()).then(0)
+            .when(pl.col("nominal_handicap").is_not_null()).then(pl.max_horizontal((pl.col("nominal_handicap") - handicap_reduction), pl.lit(0)))
+            .otherwise(pl.lit(None, dtype=pl.Int8)).alias("handicap"),
+    ).select(pl.all().exclude("nominal_handicap", "nominal_color"))
     games = games.with_columns(
         pl.lit(tournament_id, dtype=pl.String).alias("tournament"),
         info_df["gor_weight"].cast(pl.Float64).alias("gor_weight"),
     )
     return info_df, games
-
-def calculate_handicap(games, handicap_policy: str|None = None):
-    if len(games.filter(pl.col("explicit_handicap").is_not_null())) > 0:
-        games = games.with_columns(
-            pl.when(pl.col("explicit_handicap").is_null()).then(pl.lit(0)).otherwise(pl.col("explicit_handicap")).alias("handicap"),
-        )
-
-    elif handicap_policy is not None:
-        handicap_reduction = (
-            pl.lit(int(handicap_policy[1]) if handicap_policy[0] == "h" or handicap_policy[0] == "m" else int(handicap_policy))
-        )
-        games = games.with_columns(
-            pl.when((pl.col("explicit_handicap").is_null()) & (pl.col("opponent_rank_comparison_number").is_not_null()))
-              .then(pl.max_horizontal(
-                  pl.min_horizontal(np.absolute(pl.col("rank_comparison_number") - pl.col("opponent_rank_comparison_number")), pl.lit(9)) - handicap_reduction, pl.lit(0)))
-              .otherwise(pl.col("explicit_handicap")).alias("handicap")
-        )
-    else:
-        games = games.with_columns(
-            pl.col("explicit_handicap").alias("handicap")
-        )
-        
-    return games
 
 # Metadata in patterns of "<something>XY[Z]", where X and Y are characters(two characters in total) and Z is a value(arbitrary length)
 # Example "; CL[A]", "; KM[6.5]", "; HA[h9]"
