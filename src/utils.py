@@ -50,11 +50,11 @@ def _calculate_rank_comparison_number(
         rank_comparison_number_expression(rank_column).alias(output_column)
     )
 
-def rank_comparison_number_expression(rank_column: str) -> pl.Expr:
+def rank_comparison_number_expression(rank_column: str, *, anchor_1k_value = 0) -> pl.Expr:
     return (
         pl.when(pl.col(rank_column).str.ends_with("p")).then(pl.lit(None, dtype=pl.Int8))
-        .when(pl.col(rank_column).str.ends_with("d")).then(pl.col(rank_column).str.head(-1).cast(pl.Int8))
-        .when(pl.col(rank_column).str.ends_with("k")).then(1 + (pl.col(rank_column).str.head(-1).cast(pl.Int8) * -1))
+        .when(pl.col(rank_column).str.ends_with("d")).then(pl.col(rank_column).str.head(-1).cast(pl.Int8) + anchor_1k_value)
+        .when(pl.col(rank_column).str.ends_with("k")).then(1 + (pl.col(rank_column).str.head(-1).cast(pl.Int8) * -1) + anchor_1k_value)
     )
 
 def rank_to_nominal_gor_expression(rank_column: str) -> pl.Expr:
