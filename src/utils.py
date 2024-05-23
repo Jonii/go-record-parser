@@ -43,18 +43,40 @@ def _calculate_rank_comparison_number(
     ):
     """
     Adds rank comparison number column, an arbitrary number to 
-    make it easy to calculate handicap. Zero is at 1k, higher numbers are stronger."""
-    rank_extractor_pattern = r"(?P<rank_number>\d+)(?P<dankyu>[pdk])?"
-    df = df.with_columns(
-        pl.col(rank_column).str.to_lowercase(),
-    ).with_columns(
-        pl.col(rank_column).str.extract_groups(rank_extractor_pattern).alias("rank_struct"),
-    ).unnest("rank_struct").with_columns(
-        pl.col("rank_number").cast(pl.Int8)
-    ).with_columns(
-        pl.when(pl.col("dankyu") == "p").then(pl.lit(None, dtype=pl.Int8))
-        .when(pl.col("dankyu") == "d").then(pl.col("rank_number"))
-        .when(pl.col("dankyu") == "k").then(1 + pl.col("rank_number") * -1).alias(output_column),
-    ).select(pl.all().exclude(["rank_struct", "rank_number", "dankyu"]))
+    make it easy to calculate handicap. Zero is at 1k, higher numbers are stronger.
+    
+    Pro ranks are set to None, as there is no clear way to calculate handicap for them."""
+    return df.with_columns(
+        rank_comparison_number_expression(rank_column).alias(output_column)
+    )
 
-    return df
+def rank_comparison_number_expression(rank_column: str) -> pl.Expr:
+    return (
+        pl.when(pl.col(rank_column).str.ends_with("p")).then(pl.lit(None, dtype=pl.Int8))
+        .when(pl.col(rank_column).str.ends_with("d")).then(pl.col(rank_column).str.head(-1).cast(pl.Int8))
+        .when(pl.col(rank_column).str.ends_with("k")).then(1 + (pl.col(rank_column).str.head(-1).cast(pl.Int8) * -1))
+    )
+
+def rank_to_nominal_gor_expression(rank_column: str) -> pl.Expr:
+    """
+    An expression taking rank column, and producing new column `nominal_gor` containing
+    nominal gor rating as per EGD system.
+    
+    * Kyu ranks go from 30k -> -900 to 1k -> 2000(100 increment),
+    * Dan ranks go from 1d -> 2100 to 6d -> 2700(100 increment),
+    * Pro ranks go from 1p -> 2700 to 9p -> 2940(30 increment)
+    
+    Ranks capped from below by -900, so 30k and below are -900."""
+    return pl.max_horizontal(
+        pl.when(pl.col(rank_column).str.ends_with("k"))
+            .then(100 * (21 - pl.col(rank_column).str.head(-1).cast(pl.Int32)))
+            
+            .when(pl.col(rank_column).str.ends_with("d"))
+            .then(100 * (20+pl.col(rank_column).str.head(-1).cast(pl.Int32)))
+            
+            .when(pl.col(rank_column).str.ends_with("p"))
+            .then(2670 + (30 * pl.col(rank_column).str.head(-1).cast(pl.Int32)))
+            
+            .otherwise(pl.lit(None, dtype=pl.Int32)),
+        pl.lit(-900)
+    ).alias("nominal_gor")
