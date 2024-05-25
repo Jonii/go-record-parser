@@ -80,3 +80,10 @@ def rank_to_nominal_gor_expression(rank_column: str) -> pl.Expr:
             .otherwise(pl.lit(None, dtype=pl.Int32)),
         pl.lit(-900)
     ).alias("nominal_gor")
+
+def tournament_date_from_id_expression(tournament_id_column: str) -> pl.Expr:
+    return pl.when(pl.col(tournament_id_column).str.slice(1, length=1).str.starts_with("9")).then(
+        ("19" + pl.col(tournament_id_column).str.slice(1, length=6)).str.to_date("%Y%m%d")
+    ).otherwise(
+        ("20" + pl.col(tournament_id_column).str.slice(1, length=6)).str.to_date("%Y%m%d")
+    )

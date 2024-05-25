@@ -10,7 +10,7 @@ def test_handicap_calculation():
         }
     )
     df = utils.calculate_nominal_handicap(df,
-        "player_rank", 
+        "player_rank",
         "opponent_rank")
     assert df["nominal_handicap"].to_list() == [0, 1, 5, 9, None]
     assert df["nominal_color"].to_list() == [None, "b", "b", "w", None]
@@ -89,3 +89,13 @@ def test_nominal_gor_calculation():
     )
     df = df.with_columns(utils.rank_to_nominal_gor_expression("rank").alias("nominal_gor"))
     assert df["nominal_gor"].to_list() == [r[1] for r in kyu_ranks + dan_ranks + pro_ranks]
+
+def test_parsing_date_from_id():
+    df = pl.DataFrame(
+        {
+            "tournament_id": ["T961220", "T961002F", "T000103A", "W110923A", "E221213B"],
+            "actual_date": ["1996-12-20", "1996-10-02", "2000-01-03", "2011-09-23", "2022-12-13"]
+        }
+    )
+    df = df.with_columns(utils.tournament_date_from_id_expression("tournament_id").alias("tournament_date"))
+    assert df["tournament_date"].dt.to_string("%Y-%m-%d").to_list() == df["actual_date"].to_list()
